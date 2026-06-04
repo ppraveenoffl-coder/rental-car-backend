@@ -22,6 +22,7 @@ import { MaintenanceController } from './controllers/maintenance.controller';
 import { IncomeController } from './controllers/income.controller';
 import { ExpenseController } from './controllers/expense.controller';
 import { SettingsController } from './controllers/settings.controller';
+import { ReportsController } from './controllers/reports.controller';
 
 import { CustomerService } from './services/customer.service';
 import { VehicleService } from './services/vehicle.service';
@@ -33,6 +34,7 @@ import { MaintenanceService } from './services/maintenance.service';
 import { IncomeService } from './services/income.service';
 import { ExpenseService } from './services/expense.service';
 import { SettingsService } from './services/settings.service';
+import { ReportsService } from './services/reports.service';
 
 @Module({
   imports: [
@@ -61,6 +63,7 @@ import { SettingsService } from './services/settings.service';
     IncomeController,
     ExpenseController,
     SettingsController,
+    ReportsController,
   ],
   providers: [
     AppService,
@@ -76,6 +79,7 @@ import { SettingsService } from './services/settings.service';
     IncomeService,
     ExpenseService,
     SettingsService,
+    ReportsService,
   ],
   exports: [PassportModule, JwtModule],
 })
