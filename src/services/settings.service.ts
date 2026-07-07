@@ -8,21 +8,22 @@ import { Settings } from '../schemas/settings.schema';
 export class SettingsService {
   constructor(@InjectModel(Settings.name) private readonly model: Model<Settings>) {}
 
-  // GET /api/settings — auto-create an empty doc the first time.
-  async read(): Promise<any> {
-    let doc = await this.model.findOne();
-    if (!doc) doc = await this.model.create({});
+  // GET /api/settings — auto-create an empty doc for this tenant the first time.
+  async read(tenantId: string): Promise<any> {
+    let doc = await this.model.findOne({ tenantId });
+    if (!doc) doc = await this.model.create({ tenantId });
     return doc;
   }
 
-  // PUT /api/settings — upsert the single settings document.
-  async update(body: any): Promise<any> {
+  // PUT /api/settings — upsert this tenant's single settings document.
+  async update(body: any, tenantId: string): Promise<any> {
     const data = { ...body };
     delete data.id;
     delete data._id;
-    let doc = await this.model.findOne();
+    delete data.tenantId;
+    let doc = await this.model.findOne({ tenantId });
     if (!doc) {
-      doc = await this.model.create(data);
+      doc = await this.model.create({ ...data, tenantId });
     } else {
       doc.set(data);
       await doc.save();

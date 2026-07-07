@@ -1,0 +1,130 @@
+# Implementation Plan - Customer Staff Login & Mobile API Support
+
+This plan outlines how to allow customers (such as "Raja") and Admins to create and manage multiple login credentials (OTP-based) for customer staff. This enables staff to manage orders on the web portal or mobile app concurrently, while keeping all activities grouped under the parent customer profile.
+
+---
+
+## 1. Scenario Handling & Business Logic
+
+### Scenario A: Admin Creating Multiple Staff for a Customer ("Raja")
+*   **Action**: From the Admin Portal (or Admin Mobile App), the Admin selects the customer profile ("Raja") and adds multiple staff members (e.g., Staff 1: Raja-Manager, Staff 2: Raja-Billing).
+*   **Implementation**: 
+    *   The backend validates that the mobile numbers are unique across all staff profiles.
+    *   Each staff member record contains `customer_id` referencing "Raja's" Customer ID.
+
+### Scenario B: Concurrent Logins (Multiple Staff Logged In Simultaneously)
+*   **Problem**: In the existing system, regular users have device/session locks (`User already login` / `Device id not matching`). If a customer owner ("Raja") logs in, does it kick out their staff?
+*   **Resolution**: 
+    *   **Staff members will have independent device tracking**. The `device_id` and `token` fields are stored on the `CustomerStaff` record rather than the main `Customer` record.
+    *   This ensures "Raja" (Owner), Staff 1, and Staff 2 can all log in from different devices simultaneously without triggering the `User already login` session conflict.
+
+### Scenario C: Deactivation / Revocation of Staff Access
+*   **Action**: Admin or Customer Owner deactivates/deletes a staff member.
+*   **Implementation**: 
+    *   Setting `status = 0` on `CustomerStaff` immediately invalidates their session.
+    *   The JWT token verification handler (`validateUser`) will check if the requesting token contains a `staff_id`. If yes, it queries the `CustomerStaff` table to ensure that specific staff member's status is still active (`status = 1`). If inactive, it throws a `403 Forbidden` error.
+
+---
+
+## 2. Proposed Database Changes
+
+### [NEW] [customerStaff.schema.ts](file:///c:/ASM%20Project/Git/ASM-Sales-backend/ASM-SalesBackend/src/schemas/customerStaff.schema.ts)
+Stores individual staff details linked to a parent `Customer`:
+
+```typescript
+import { Schema, Prop, SchemaFactory } from '@nestjs/mongoose';
+import mongoose, { Document, ObjectId } from 'mongoose';
+
+@Schema({
+    timestamps: true,
+    versionKey: false
+})
+export class CustomerStaff extends Document {
+    _id: ObjectId;
+
+    @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true })
+    customer_id: ObjectId; // Links to "Raja"
+
+    @Prop({ type: String, required: true })
+    name: string; // e.g. "Raja Manager"
+
+    @Prop({ type: String, required: true, unique: true })
+    mobile_no: string;
+
+    @Prop({ type: Number, default: 1 }) // 0 - Inactive, 1 - Active
+    status: number;
+
+    @Prop({ type: String })
+    device_id: string;
+
+    @Prop({ type: String })
+    token: string;
+
+    @Prop({ type: [String], default: ['view_orders', 'create_orders'] })
+    permissions: string[];
+}
+
+export const CustomerStaffSchema = SchemaFactory.createForClass(CustomerStaff);
+CustomerStaffSchema.index({ mobile_no: 1 });
+CustomerStaffSchema.index({ customer_id: 1 });
+```
+
+---
+
+## 3. Backend Implementation Details
+
+### A. Updating Token Verification Guard
+In `login.service.ts` under `validateUser`:
+
+```typescript
+async validateUser(payload: any) {
+  // If the token belongs to a customer login session
+  if (payload.role === Role.CUSTOMER) {
+    const customer = await this.CustomerModel.findById(payload._id);
+    if (!customer || customer.status === 0 || customer.customer_login_portal === 0) {
+      throw new HttpException('Mobile access blocked or customer inactive', HttpStatus.FORBIDDEN);
+    }
+
+    // Check if logged in as staff
+    if (payload.staff_id) {
+      const staff = await this.customerStaffModel.findById(payload.staff_id);
+      if (!staff || staff.status === 0) {
+        throw new HttpException('Staff access deactivated', HttpStatus.FORBIDDEN);
+      }
+      
+      // Compare device ID for staff session validation
+      if (payload.device_id && staff.device_id && staff.device_id !== payload.device_id) {
+        throw new HttpException('Staff logged in on another device', HttpStatus.UNAUTHORIZED);
+      }
+      if (staff.token && staff.token !== payload.rawToken) {
+        throw new HttpException('Session expired', HttpStatus.UNAUTHORIZED);
+      }
+      return customer; // Return parent customer context for API endpoints
+    }
+
+    // Standard Customer Owner device id checks
+    if (payload.device_id && customer.device_id && customer.device_id !== payload.device_id) {
+      throw new HttpException('Owner logged in on another device', HttpStatus.UNAUTHORIZED);
+    }
+    return customer;
+  }
+  
+  // Regular user validation...
+}
+```
+
+### B. Admin CRUD Controllers
+Allows Admins to manage staff list for any customer:
+*   `POST /customer-staff/admin-create` (Create staff for any customer ID)
+*   `GET /customer-staff/admin-list/:customerId` (List staff for a customer)
+
+---
+
+## 4. Frontend MUI Management View (For Admins & Customers)
+
+The Admin Portal can render a Customer Staff List widget on the Customer Detail Page where multiple staff can be added or updated with names and mobile numbers.
+
+### UI Layout Flow:
+1. **Add Staff Modal**: Input Name and Mobile. Click Save.
+2. **Staff Cards/Table**: Shows all active staff, allowing the Admin to edit their details or toggle their status.
+3. **Delete/Deactivate**: A switch that toggles `status: 1` to `0` or vice versa.

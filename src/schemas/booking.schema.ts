@@ -4,6 +4,8 @@ import { baseSchemaOptions } from '../utils/helper/schema-options';
 
 @Schema(baseSchemaOptions)
 export class Booking extends Document {
+  @Prop({ type: String, index: true }) tenantId: string;
+
   @Prop({ type: String }) bookingNo: string;
   @Prop({ type: String }) customerId: string;
   @Prop({ type: String }) vehicleId: string;
@@ -27,3 +29,10 @@ export class Booking extends Document {
 }
 
 export const Bookingschema = SchemaFactory.createForClass(Booking);
+
+// bookings are the busiest collection — index the join/filter keys
+Bookingschema.index({ tenantId: 1, createdAt: -1 });
+Bookingschema.index({ tenantId: 1, vehicleId: 1 });
+Bookingschema.index({ tenantId: 1, customerId: 1 });
+Bookingschema.index({ tenantId: 1, status: 1 });
+Bookingschema.index({ tenantId: 1, fromDate: 1 });

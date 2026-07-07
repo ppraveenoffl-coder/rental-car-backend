@@ -11,9 +11,17 @@ import { Maintenance, Maintenanceschema } from './schemas/maintenance.schema';
 import { Income, Incomeschema } from './schemas/income.schema';
 import { Expense, Expenseschema } from './schemas/expense.schema';
 import { Settings, Settingsschema } from './schemas/settings.schema';
+import { Tenant, Tenantschema } from './schemas/tenant.schema';
+import { Device, Deviceschema } from './schemas/device.schema';
+import { Commission, Commissionschema } from './schemas/commission.schema';
 
 export default [
-  MongooseModule.forRoot(dbConfig.uri, { serverSelectionTimeoutMS: 8000 }),
+  // pooled connection sized for many concurrent tenants
+  MongooseModule.forRoot(dbConfig.uri, {
+    serverSelectionTimeoutMS: 8000,
+    maxPoolSize: Number(process.env.MONGO_POOL_SIZE) || 50,
+    minPoolSize: 5,
+  }),
   MongooseModule.forFeature([
     { name: User.name, schema: Userschema },
     { name: Customer.name, schema: Customerschema },
@@ -26,5 +34,8 @@ export default [
     { name: Income.name, schema: Incomeschema },
     { name: Expense.name, schema: Expenseschema },
     { name: Settings.name, schema: Settingsschema },
+    { name: Tenant.name, schema: Tenantschema },
+    { name: Device.name, schema: Deviceschema },
+    { name: Commission.name, schema: Commissionschema },
   ]),
 ];

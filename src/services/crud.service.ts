@@ -27,20 +27,27 @@ export interface PagedResult<T> {
 export abstract class CrudService<T> {
   protected constructor(protected readonly model: Model<T>) {}
 
-  // list → newest first (full collection; used by the in-memory store + reports)
-  async list(): Promise<any> {
-    return this.model.find().sort({ createdAt: -1 });
+  // Every method is scoped to a tenant — `tenantId` comes from the JWT (see the
+  // @TenantId() decorator) and is mixed into every filter so one tenant can never
+  // read or write another tenant's documents, even by guessing an _id.
+  private scope(tenantId: string, extra: Record<string, any> = {}): Record<string, any> {
+    return { tenantId, ...extra };
+  }
+
+  // list → newest first (full collection for this tenant; used by the in-memory store)
+  async list(tenantId: string): Promise<any> {
+    return this.model.find(this.scope(tenantId)).sort({ createdAt: -1 });
   }
 
   // paginated + sorted + searched list → { data, total, page, limit, totalPages }
   // `search` is regex-matched (case-insensitive) against the supplied searchFields.
-  async listPaged(opts: ListQuery): Promise<PagedResult<any>> {
+  async listPaged(opts: ListQuery, tenantId: string): Promise<PagedResult<any>> {
     const page = Math.max(1, Number(opts.page) || 1);
     const limit = Math.min(200, Math.max(1, Number(opts.limit) || 10));
     const sortField = opts.sort || 'createdAt';
     const sortDir = opts.order === 'asc' ? 1 : -1;
 
-    const filter: Record<string, any> = {};
+    const filter: Record<string, any> = this.scope(tenantId);
     const search = (opts.search || '').trim();
     if (search && opts.searchFields?.length) {
       const rx = new RegExp(escapeRegex(search), 'i');
@@ -59,27 +66,29 @@ export abstract class CrudService<T> {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
   }
 
-  // single → 404 if missing
-  async get(id: string): Promise<any> {
-    const doc = await this.model.findById(id);
+  // single → 404 if missing or owned by another tenant
+  async get(id: string, tenantId: string): Promise<any> {
+    const doc = await this.model.findOne(this.scope(tenantId, { _id: id }));
     if (!doc) throw new NotFoundException({ message: 'Not found' });
     return doc;
   }
 
-  // create → strip id/_id, return created doc
-  async create(body: any): Promise<any> {
+  // create → strip id/_id, stamp the tenant, return created doc
+  async create(body: any, tenantId: string): Promise<any> {
     const data = { ...body };
     delete data.id;
     delete data._id;
+    data.tenantId = tenantId; // force — never trust a client-supplied tenantId
     return this.model.create(data);
   }
 
-  // update → strip id/_id, run validators, 404 if missing
-  async update(id: string, body: any): Promise<any> {
+  // update → strip id/_id, run validators, 404 if missing / other tenant
+  async update(id: string, body: any, tenantId: string): Promise<any> {
     const data = { ...body };
     delete data.id;
     delete data._id;
-    const doc = await this.model.findByIdAndUpdate(id, data, {
+    delete data.tenantId; // immutable
+    const doc = await this.model.findOneAndUpdate(this.scope(tenantId, { _id: id }), data, {
       new: true,
       runValidators: true,
     });
@@ -87,9 +96,9 @@ export abstract class CrudService<T> {
     return doc;
   }
 
-  // delete → 404 if missing, else { id, deleted: true }
-  async remove(id: string): Promise<any> {
-    const doc = await this.model.findByIdAndDelete(id);
+  // delete → 404 if missing / other tenant, else { id, deleted: true }
+  async remove(id: string, tenantId: string): Promise<any> {
+    const doc = await this.model.findOneAndDelete(this.scope(tenantId, { _id: id }));
     if (!doc) throw new NotFoundException({ message: 'Not found' });
     return { id, deleted: true };
   }

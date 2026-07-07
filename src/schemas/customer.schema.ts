@@ -4,6 +4,8 @@ import { baseSchemaOptions } from '../utils/helper/schema-options';
 
 @Schema(baseSchemaOptions)
 export class Customer extends Document {
+  @Prop({ type: String, index: true }) tenantId: string;
+
   @Prop({ type: String }) name: string;
   @Prop({ type: String }) mobile: string;
   @Prop({ type: String }) address: string;
@@ -20,3 +22,7 @@ export class Customer extends Document {
 }
 
 export const Customerschema = SchemaFactory.createForClass(Customer);
+
+// tenant-scoped list (newest first) + common lookups
+Customerschema.index({ tenantId: 1, createdAt: -1 });
+Customerschema.index({ tenantId: 1, mobile: 1 });

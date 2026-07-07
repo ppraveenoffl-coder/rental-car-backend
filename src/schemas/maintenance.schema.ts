@@ -4,6 +4,8 @@ import { baseSchemaOptions } from '../utils/helper/schema-options';
 
 @Schema(baseSchemaOptions)
 export class Maintenance extends Document {
+  @Prop({ type: String, index: true }) tenantId: string;
+
   @Prop({ type: String }) serviceDate: string;
   @Prop({ type: String }) vehicleId: string;
   @Prop({ type: Number }) odometer: number;
@@ -15,3 +17,6 @@ export class Maintenance extends Document {
 }
 
 export const Maintenanceschema = SchemaFactory.createForClass(Maintenance);
+
+Maintenanceschema.index({ tenantId: 1, createdAt: -1 });
+Maintenanceschema.index({ tenantId: 1, vehicleId: 1 });

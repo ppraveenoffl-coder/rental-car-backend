@@ -4,6 +4,8 @@ import { baseSchemaOptions } from '../utils/helper/schema-options';
 
 @Schema(baseSchemaOptions)
 export class Handover extends Document {
+  @Prop({ type: String, index: true }) tenantId: string;
+
   @Prop({ type: String }) bookingId: string;
   @Prop({ type: String }) date: string;
   @Prop({ type: Number }) odometer: number;
@@ -20,3 +22,6 @@ export class Handover extends Document {
 }
 
 export const Handoverschema = SchemaFactory.createForClass(Handover);
+
+Handoverschema.index({ tenantId: 1, createdAt: -1 });
+Handoverschema.index({ tenantId: 1, bookingId: 1 });

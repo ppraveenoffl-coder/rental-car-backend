@@ -14,11 +14,27 @@ export class User extends Document {
   @Prop({ type: String, required: true })
   password: string;
 
-  @Prop({ type: String, enum: [Role.ADMIN, Role.STAFF], default: Role.STAFF })
+  @Prop({ type: String, enum: [Role.SUPERADMIN, Role.ADMIN, Role.STAFF], default: Role.STAFF })
   role: string;
+
+  // the tenant this user belongs to. null only for the SUPERADMIN (SaaS operator).
+  @Prop({ type: String, index: true, default: null })
+  tenantId: string;
 
   @Prop({ type: Boolean, default: true })
   active: boolean;
+
+  // any token issued before this moment is rejected — invalidates old sessions
+  // whenever the password is changed or reset.
+  @Prop({ type: Date })
+  passwordChangedAt: Date;
+
+  // forgot-password: SHA-256 of the emailed reset token + its expiry (single use)
+  @Prop({ type: String, default: null })
+  resetTokenHash: string;
+
+  @Prop({ type: Date, default: null })
+  resetTokenExpiry: Date;
 }
 
 export const Userschema = SchemaFactory.createForClass(User);

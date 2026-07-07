@@ -84,7 +84,7 @@ const byId = (docs: any[]) => {
 const byBooking = (docs: any[]) => {
   const m: Record<string, any> = {};
   docs.forEach((d) => {
-    if (d.bookingId && !m[d.bookingId]) m[d.bookingId] = d;
+    if (d.bookingId && !m[String(d.bookingId)]) m[String(d.bookingId)] = d;
   });
   return m;
 };
@@ -107,16 +107,17 @@ export class ReportsService {
   ) {}
 
   // ---- Trip Report ---------------------------------------------------------
-  async tripReport(q: ReportQuery): Promise<ReportResult> {
+  async tripReport(q: ReportQuery, tenantId: string): Promise<ReportResult> {
     const { from, to, search, vehicleId } = q;
+    const t = { tenantId };
     const [bookings, incomes, expenses, handovers, returns, vehicles, customers] = await Promise.all([
-      this.bookingModel.find().sort({ createdAt: -1 }).lean(),
-      this.incomeModel.find().lean(),
-      this.expenseModel.find().lean(),
-      this.handoverModel.find().lean(),
-      this.returnModel.find().lean(),
-      this.vehicleModel.find().lean(),
-      this.customerModel.find().lean(),
+      this.bookingModel.find(t).sort({ createdAt: -1 }).lean(),
+      this.incomeModel.find(t).lean(),
+      this.expenseModel.find(t).lean(),
+      this.handoverModel.find(t).lean(),
+      this.returnModel.find(t).lean(),
+      this.vehicleModel.find(t).lean(),
+      this.customerModel.find(t).lean(),
     ]);
 
     const vMap = byId(vehicles);
@@ -126,11 +127,14 @@ export class ReportsService {
 
     const incomeByBooking: Record<string, number> = {};
     incomes.forEach((i: any) => {
-      if (i.bookingId) incomeByBooking[i.bookingId] = (incomeByBooking[i.bookingId] || 0) + Number(i.amount || 0);
+      if (i.bookingId) {
+        const bid = String(i.bookingId);
+        incomeByBooking[bid] = (incomeByBooking[bid] || 0) + Number(i.amount || 0);
+      }
     });
 
     let rows = bookings
-      .filter((b: any) => inRange(b.fromDate, from, to) && (!vehicleId || b.vehicleId === vehicleId))
+      .filter((b: any) => inRange(b.fromDate, from, to) && (!vehicleId || String(b.vehicleId) === vehicleId))
       .map((b: any) => {
         const id = String(b._id);
         return {
@@ -138,8 +142,8 @@ export class ReportsService {
           bookingNo: b.bookingNo || id,
           fromDate: b.fromDate || '',
           toDate: b.toDate || '',
-          vehicle: vehicleLabel(vMap[b.vehicleId]),
-          customer: customerLabel(cMap[b.customerId]),
+          vehicle: vehicleLabel(vMap[String(b.vehicleId)]),
+          customer: customerLabel(cMap[String(b.customerId)]),
           destination: b.destination || '—',
           km: tripKm(b, hMap[id], rMap[id]),
           revenue: incomeByBooking[id] || 0,
@@ -153,7 +157,7 @@ export class ReportsService {
     const totalKm = rows.reduce((s, t) => s + t.km, 0);
     const totalRevenue = rows.reduce((s, t) => s + t.revenue, 0);
     const totalExpense = expenses
-      .filter((e: any) => inRange(e.date, from, to) && (!vehicleId || e.vehicleId === vehicleId))
+      .filter((e: any) => inRange(e.date, from, to) && (!vehicleId || String(e.vehicleId) === vehicleId))
       .reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
 
     return {
@@ -163,15 +167,16 @@ export class ReportsService {
   }
 
   // ---- Profit & Loss by vehicle -------------------------------------------
-  async profitLossReport(q: ReportQuery): Promise<ReportResult> {
+  async profitLossReport(q: ReportQuery, tenantId: string): Promise<ReportResult> {
     const { from, to, search } = q;
+    const t = { tenantId };
     const [bookings, incomes, expenses, handovers, returns, vehicles] = await Promise.all([
-      this.bookingModel.find().lean(),
-      this.incomeModel.find().lean(),
-      this.expenseModel.find().lean(),
-      this.handoverModel.find().lean(),
-      this.returnModel.find().lean(),
-      this.vehicleModel.find().sort({ createdAt: -1 }).lean(),
+      this.bookingModel.find(t).lean(),
+      this.incomeModel.find(t).lean(),
+      this.expenseModel.find(t).lean(),
+      this.handoverModel.find(t).lean(),
+      this.returnModel.find(t).lean(),
+      this.vehicleModel.find(t).sort({ createdAt: -1 }).lean(),
     ]);
 
     const hMap = byBooking(handovers);
@@ -179,17 +184,17 @@ export class ReportsService {
 
     // income is keyed by booking → resolve each booking to its vehicle
     const bookingVehicle: Record<string, string> = {};
-    bookings.forEach((b: any) => (bookingVehicle[String(b._id)] = b.vehicleId));
+    bookings.forEach((b: any) => (bookingVehicle[String(b._id)] = String(b.vehicleId)));
 
     let rows = vehicles.map((v: any) => {
       const vid = String(v._id);
-      const trips = bookings.filter((b: any) => b.vehicleId === vid && inRange(b.fromDate, from, to));
+      const trips = bookings.filter((b: any) => String(b.vehicleId) === vid && inRange(b.fromDate, from, to));
       const km = trips.reduce((s: number, b: any) => s + tripKm(b, hMap[String(b._id)], rMap[String(b._id)]), 0);
       const income = incomes
-        .filter((i: any) => inRange(i.date, from, to) && bookingVehicle[i.bookingId] === vid)
+        .filter((i: any) => inRange(i.date, from, to) && bookingVehicle[String(i.bookingId)] === vid)
         .reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
       const expense = expenses
-        .filter((e: any) => e.vehicleId === vid && inRange(e.date, from, to))
+        .filter((e: any) => String(e.vehicleId) === vid && inRange(e.date, from, to))
         .reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
       const profit = income - expense;
       return {
@@ -206,23 +211,28 @@ export class ReportsService {
 
     rows = applySearch(rows, ['vehicle'], search);
 
-    const income = rows.reduce((s, r) => s + r.income, 0);
-    const expense = rows.reduce((s, r) => s + r.expense, 0);
-    const netProfit = income - expense;
+    const totalIncome = incomes
+      .filter((i: any) => inRange(i.date, from, to))
+      .reduce((s: number, i: any) => s + Number(i.amount || 0), 0);
+    const totalExpense = expenses
+      .filter((e: any) => inRange(e.date, from, to))
+      .reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
+    const netProfit = totalIncome - totalExpense;
 
     return {
       ...paginate(rows, q.page, q.limit),
-      summary: { income, expense, netProfit, margin: income ? (netProfit / income) * 100 : 0 },
+      summary: { income: totalIncome, expense: totalExpense, netProfit, margin: totalIncome ? (netProfit / totalIncome) * 100 : 0 },
     };
   }
 
   // ---- Trip Creation Report ------------------------------------------------
-  async tripCreationReport(q: ReportQuery): Promise<ReportResult> {
+  async tripCreationReport(q: ReportQuery, tenantId: string): Promise<ReportResult> {
     const { from, to, search } = q;
+    const t = { tenantId };
     const [bookings, vehicles, customers] = await Promise.all([
-      this.bookingModel.find().sort({ createdAt: -1 }).lean(),
-      this.vehicleModel.find().lean(),
-      this.customerModel.find().lean(),
+      this.bookingModel.find(t).sort({ createdAt: -1 }).lean(),
+      this.vehicleModel.find(t).lean(),
+      this.customerModel.find(t).lean(),
     ]);
 
     const vMap = byId(vehicles);
@@ -240,8 +250,8 @@ export class ReportsService {
           id,
           bookingNo: b.bookingNo || id,
           created,
-          customer: customerLabel(cMap[b.customerId]),
-          vehicle: vehicleLabel(vMap[b.vehicleId]),
+          customer: customerLabel(cMap[String(b.customerId)]),
+          vehicle: vehicleLabel(vMap[String(b.vehicleId)]),
           destination: b.destination || '—',
           fromDate: b.fromDate || '',
           toDate: b.toDate || '',

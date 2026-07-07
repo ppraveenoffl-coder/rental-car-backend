@@ -1,0 +1,370 @@
+# Trip Map Tracking Portal — Implementation Documentation
+
+**Feature**: Trip Map Dashboard with Multi-Route Visualization & Playback  
+**Session Duration**: ~2 hours (June 8, 2026, 4:50 PM – 6:50 PM IST)  
+**Developer**: AI-assisted implementation  
+
+---
+
+## 1. Feature Overview
+
+The **Trip Map Tracking Portal** is a full-page dashboard that displays delivery trip routes on an interactive map. It supports both **single-trip** (detailed view) and **multi-trip** (overview) modes, with real-time vehicle animation playback, route color coding, and comprehensive trip analytics.
+
+### Key Capabilities
+- View all trips for a selected date on a single map
+- Filter trips by session (Morning/Evening/All)
+- Each route displayed with a **unique color** and numbered waypoint markers
+- **Vehicle animation playback** — play, pause, forward, backward, reset with adjustable speed
+- **Single trip mode**: detailed sidebar with timeline, financial summary, route stats
+- **Multi-trip mode**: route list cards with enable/disable toggles per route
+- Click a trip card in multi-trip mode to drill into single-trip detail
+- Toggle numbered markers on/off
+- Route deviation detection with alert
+
+---
+
+## 2. Architecture & File Structure
+
+### Component Hierarchy
+
+```mermaid
+graph TD
+    A["TripMapDashboardPage<br/>(Page Component)"] --> B["TripMapDashboardView<br/>(Section/View Component)"]
+    B --> C["TripMapComponent<br/>(Map Engine)"]
+    B --> D["Control Bar<br/>(Date, Session, Trip Select, Toggle)"]
+    C --> E["Leaflet Map"]
+    C --> F["Routing Machine"]
+    C --> G["Sidebar Panel"]
+```
+
+### File Inventory
+
+| File | Path | Purpose | Lines |
+|------|------|---------|-------|
+| **Page** | [trip-map-dashboard.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/pages/dashboard/trip-map/trip-map-dashboard.tsx) | Route entry point, Helmet SEO | 15 |
+| **Dashboard View** | [trip-map-dashboard-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-map/trip-map-dashboard-view.tsx) | Control bar, trip filtering, layout shell | 452 |
+| **Map Component** | [trip-map-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-creation/trip-map-view.tsx) | Core Leaflet map, routing, playback, sidebar | 1495 |
+| **Map Styles** | [map-style.css](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-creation/map-style.css) | All map UI styling (sidebar, timeline, markers) | 470 |
+| **Menu Utility** | [menuCall.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/utils/menuCall.tsx) | Breadcrumb "Back" navigation hook | 34 |
+| **Route Config** | [dashboard.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/routes/sections/dashboard.tsx#L1303-L1313) | Route registration at `/dashboard/trip-map` | — |
+| **Paths** | [paths.ts](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/routes/paths.ts#L374-L376) | `paths.dashboard.tripMap.root` | — |
+
+---
+
+## 3. Layer-by-Layer Implementation Details
+
+### 3.1 Page Layer — `TripMapDashboardPage`
+
+**File**: [trip-map-dashboard.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/pages/dashboard/trip-map/trip-map-dashboard.tsx)
+
+Simple page wrapper with `<Helmet>` for SEO title. Renders `<TripMapDashboardView />`.
+
+```tsx
+export default function TripMapDashboardPage() {
+  return (
+    <>
+      <Helmet><title>Dashboard: Trip Map Dashboard</title></Helmet>
+      <TripMapDashboardView />
+    </>
+  );
+}
+```
+
+**Route**: Registered at `/dashboard/trip-map` in [dashboard.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/routes/sections/dashboard.tsx#L1307), gated behind `SUB_MENU.TRIP_CREATION` permission.
+
+---
+
+### 3.2 Dashboard View Layer — `TripMapDashboardView`
+
+**File**: [trip-map-dashboard-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-map/trip-map-dashboard-view.tsx)
+
+This component provides the **control bar** and **layout container** for the map.
+
+#### State Management
+
+| State | Type | Purpose |
+|-------|------|---------|
+| `selectedDate` | `Date \| null` | Date picker value (defaults to today) |
+| `selectedSession` | `string` | `'All'`, `'M'`, or `'E'` |
+| `tripList` | `TripItem[]` | All trips for the selected date |
+| `selectedTripId` | `string` | Currently selected trip (empty = show all) |
+| `loading` | `boolean` | Loading state during API fetch |
+| `showNumbers` | `boolean` | Toggle numbered markers on/off |
+
+#### API Integration
+
+```
+POST /trip/list
+Body: { startDate, endDate, page: 1, sizePerPage: 1000 }
+```
+
+Fetches all trips for the selected date on mount and whenever the date changes.
+
+#### Control Bar Layout (MUI Grid)
+
+| Column | Width | Component |
+|--------|-------|-----------|
+| Date Picker | `md={2.2}` | `@mui/x-date-pickers/DatePicker` |
+| Session Filter | `md={1.8}` | `Select` — All / Morning / Evening |
+| Trip Selector | `md={3.2}` | `Select` — Show All Trips or individual trip |
+| Show Numbers | `md={2}` | `Switch` toggle |
+| Stats Badge | `md={2.8}` | Morning/Evening counts + total trips circle |
+
+#### Map Embedding
+
+The `TripMapComponent` receives:
+```tsx
+<TripMapComponent
+  ids={selectedTripId ? [selectedTripId] : filteredTripList.map(t => t._id)}
+  showNumbers={showNumbers}
+  onSelectTripId={setSelectedTripId}
+/>
+```
+
+- **Single trip mode**: `ids` has 1 element → detailed sidebar with timeline
+- **Multi-trip mode**: `ids` has multiple elements → overview sidebar with route cards
+
+#### CSS Containment
+
+The dashboard wraps the map in a `<Card>` with `id="map-dashboard-container"` and uses a `<style>` block (lines 289–404) to override Leaflet's default fixed positioning, constraining the map and sidebar within the card boundaries.
+
+> [!IMPORTANT]
+> The `<style>` block uses `!important` overrides to ensure the sidebar stays positioned absolutely within the card, rather than being fixed to the viewport (which is Leaflet's default behavior).
+
+---
+
+### 3.3 Map Engine Layer — `TripMapComponent`
+
+**File**: [trip-map-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-creation/trip-map-view.tsx)
+
+This is the core component (~1495 lines) handling all map logic.
+
+#### Props
+
+```typescript
+interface Props {
+  ids: string[];              // Trip IDs to display
+  showNumbers?: boolean;       // Show numbered markers
+  onSelectTripId?: (id: string) => void;  // Callback for trip selection
+}
+```
+
+#### Ref Architecture
+
+| Ref | Type | Purpose |
+|-----|------|---------|
+| `mapRef` | `L.Map \| null` | Leaflet map instance |
+| `routingControlRef` | `any` | Single-trip routing control reference |
+| `movingMarkerRef` | `L.Marker \| null` | Single-trip moving vehicle marker |
+| `movingMarkersRef` | `Record<string, L.Marker>` | Multi-trip vehicle markers (keyed by trip ID) |
+| `tripRoutePointsRef` | `Record<string, L.LatLng[]>` | Route coordinates per trip |
+| `tripCurrentPositionsRef` | `Record<string, number>` | Current playback position per trip |
+| `playIntervalRef` | `NodeJS.Timeout \| null` | Playback interval handle |
+| `forwardIntervalRef` | `NodeJS.Timeout \| null` | Forward movement interval |
+| `backwardIntervalRef` | `NodeJS.Timeout \| null` | Backward movement interval |
+| `currentPositionRef` | `number` | Single-trip current position index |
+| `waypointsRef` | `Waypoint[]` | Waypoint data for proximity matching |
+| `itemRefs` | `HTMLButtonElement[]` | Timeline item DOM refs for scroll-into-view |
+
+#### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant DV as Dashboard View
+    participant MC as Map Component
+    participant API as Backend API
+    participant LF as Leaflet Map
+
+    DV->>MC: ids, showNumbers
+    MC->>API: POST /sales/list (code=0, sales)
+    MC->>API: POST /sales/list (code=2, counter)
+    API-->>MC: Sales + Counter data
+    MC->>MC: Sort by bill_no, extract lat/lng
+    MC->>LF: Initialize map + tile layer
+    MC->>LF: Create Routing Control per trip
+    LF-->>MC: routesfound event → coordinates
+    MC->>LF: Add vehicle markers at start positions
+    MC->>LF: fitBounds() to show all markers
+```
+
+#### Route Color System
+
+9 predefined colors cycle for multi-trip display:
+
+```typescript
+const ROUTE_COLORS = [
+  '#2563EB', // Blue
+  '#DC2626', // Red
+  '#16A34A', // Green
+  '#D97706', // Amber
+  '#7C3AED', // Purple
+  '#0891B2', // Cyan
+  '#DB2777', // Pink
+  '#EA580C', // Orange
+  '#4B5563', // Slate
+];
+```
+
+Each trip is assigned `ROUTE_COLORS[index % 9]` for both the route polyline and numbered waypoint markers.
+
+#### Marker Types
+
+| Mode | `showNumbers=true` | `showNumbers=false` |
+|------|-------------------|---------------------|
+| Waypoints | `L.divIcon` with numbered pin (teardrop shape) | `L.circleMarker` (small dot) |
+| Vehicle | SVG delivery truck icon (`L.divIcon`) | Same |
+
+#### Playback System
+
+The playback system supports both single and multi-trip modes:
+
+| Control | Single Trip | Multi Trip |
+|---------|------------|------------|
+| ▶️ Play | Animates vehicle along route coordinates | Animates all active vehicles simultaneously |
+| ⏸️ Pause | Stops interval | Same |
+| ⏹️ Stop | Stops + disables nav buttons | Same |
+| ⏩ Forward | Step-by-step forward with speed control | All vehicles step forward |
+| ⏪ Backward | Step-by-step backward | All vehicles step backward |
+| 🔄 Reset | Returns to start position | All vehicles return to start |
+| Speed | 0.5x – 5x via select dropdown | Same |
+
+**Deviation Detection** (Single trip only): If vehicle position deviates > 100m from the route, an alert is triggered.
+
+#### Sidebar Content
+
+**Single Trip Mode** (when `ids.length === 1`):
+- Trip header (trip number, route code, date, session)
+- Summary grid (12 items): start/end time, total time, start/end KM, driver, vehicle, route code, distance, customer count, sales value, receipt value
+- Financial summary: opening balance, closing balance
+- Playback controls
+- Filter tabs: All / Sales / Delivery Notes / Collection / Counter
+- Timeline: scrollable list of waypoint cards with bill details
+
+**Multi Trip Mode** (when `ids.length > 1`):
+- "Routes On Map" header with gradient
+- Playback controls
+- Scrollable route cards with:
+  - Trip number, route code, vehicle, driver, checkpoint count
+  - Color indicator dot matching route color
+  - Enable/disable toggle switch per route
+  - Click to drill into single trip view
+
+#### Map Cleanup (Bug Fix Applied)
+
+**File**: [trip-map-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-creation/trip-map-view.tsx#L457-L510)
+
+The `useEffect` cleanup follows a strict order to prevent `removeLayer` errors:
+
+```
+1. Clear all playback intervals (play, forward, backward)
+2. Remove moving markers from map (with try/catch per marker)
+3. Remove routing controls (with try/catch per control)
+   - Unbind event handlers
+   - Guard: check control._map exists
+   - Clear waypoints before remove
+   - Call control.remove()
+4. Destroy the map instance (with try/catch)
+5. Null all refs
+```
+
+> [!WARNING]
+> The `useEffect` depends on `[allTripsData, filter, showNumbers, disabledTripIds, ids, loading]`. Any of these changing will tear down and rebuild the entire map. This is by design since Leaflet routing machine doesn't support dynamic route updates.
+
+---
+
+## 4. CSS Architecture
+
+**File**: [map-style.css](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-creation/map-style.css) (470 lines)
+
+### CSS Sections
+
+| Section | Lines | Purpose |
+|---------|-------|---------|
+| Map & Sidebar base | 1–49 | Fixed positioning, sidebar slide animation |
+| Navbar Header | 51–80 | Trip info header with gradient |
+| Summary Grid | 82–107 | 3-column grid for trip stats |
+| Financial Summary | 109–148 | Opening/closing balance display |
+| Playback Controls | 150–206 | Circular buttons, speed selector |
+| Filter Tabs | 208–249 | Pill-style tab bar |
+| Timeline | 251–386 | Vertical timeline with progress line, car icon, cards |
+| Leaflet Icons | 388–438 | Numbered pin markers, vehicle SVG markers |
+| Animations | 440–453 | Loading pulse animation |
+| Dashboard Overrides | 455–470 | Overlay styles for embedded mode |
+
+### Dashboard Container Overrides
+
+The `<style>` block in [trip-map-dashboard-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-map/trip-map-dashboard-view.tsx#L289-L404) overrides the default fixed-position map styles to work within a card container:
+
+| Override | Purpose |
+|----------|---------|
+| `#map-dashboard-container` | Sets `70vh` height, creates stacking context with `transform` |
+| `#map` inside container | Changes from `fixed` to `absolute` positioning |
+| `.sidebar` inside container | Positions as absolute overlay at top-right (380px wide) |
+| `.loading` inside container | Full-cover loading overlay within card |
+
+---
+
+## 5. API Endpoints Used
+
+| Endpoint | Method | Request Body | Purpose |
+|----------|--------|-------------|---------|
+| `/trip/list` | POST | `{ startDate, endDate, page, sizePerPage }` | Fetch trips for date range |
+| `/sales/list` | POST | `{ code: 0, trip_id, page, sort, sortBy, sizePerPage, name: 'sales' }` | Fetch sales data for trip |
+| `/sales/list` | POST | `{ code: 2, trip_id, page, sort, sortBy, sizePerPage, name: '' }` | Fetch counter sales for trip |
+
+---
+
+## 6. External Dependencies
+
+| Package | Version | Usage |
+|---------|---------|-------|
+| `leaflet` | — | Map rendering, tile layers, markers |
+| `leaflet-routing-machine` | — | Route calculation between waypoints via OSRM |
+| `leaflet-geometryutil` | — | Closest point on route calculation (deviation detection) |
+| `@mui/material` | — | UI components (Card, Grid, Select, Switch, etc.) |
+| `@mui/x-date-pickers` | — | DatePicker component |
+
+> [!NOTE]
+> `leaflet-routing-machine` uses the **OSRM demo server** by default for route calculations. For production, configure a self-hosted OSRM instance or use a paid routing service.
+
+---
+
+## 7. Bug Fixes Applied During Session
+
+### Fix 1: Breadcrumb "Back" → Blank Page
+
+| Item | Detail |
+|------|--------|
+| **File** | [menuCall.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/utils/menuCall.tsx) |
+| **Root Cause** | After page refresh, `menuItems.menuValue` is empty. Toggling an empty menu drawer = blank page |
+| **Fix** | Check if `menuValue` is empty; if so, `router.push(paths.dashboard.root)` instead of toggling |
+| **Impact** | All pages using `useHandleOpenLastMenu` hook benefit |
+
+### Fix 2: Leaflet `removeLayer` Console Errors
+
+| Item | Detail |
+|------|--------|
+| **File** | [trip-map-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/trip-creation/trip-map-view.tsx#L457-L510) |
+| **Root Cause** | Cleanup called `control.remove()` which internally calls `this._map.removeLayer(...)`, but map was already null |
+| **Fix** | Reordered cleanup (intervals → markers → controls → map), added per-control `try/catch`, guard on `control._map` |
+| **Impact** | Eliminates all `Cannot read properties of null (reading 'removeLayer')` errors |
+
+### Fix 3: ESLint Import Ordering
+
+| Item | Detail |
+|------|--------|
+| **File** | [inventory-list-view.tsx](file:///c:/ASM%20Project/Git/ASM-Sales-React/Sales-web/src/sections/inventory-dashboard/view/inventory-list-view.tsx) |
+| **Fix** | Reordered `src/utils/*` imports to reverse-alphabetical: `progress` → `menuCall` → `format-time` |
+
+---
+
+## 8. Known Limitations & Future Improvements
+
+| Area | Current State | Improvement Needed |
+|------|--------------|-------------------|
+| OSRM Server | Uses public demo server | Self-host OSRM for production reliability |
+| Map Rebuild | Entire map rebuilds on filter/toggle change | Optimize to only update markers/polylines |
+| Deviation Alert | Uses `alert()` popup | Replace with toast notification |
+| Real-time Tracking | Playback of historical data only | Integrate live GPS API (e.g., Wheelseye) |
+| Route Optimization | Routes shown as-is | Add optimized vs actual route comparison |
+| Mobile Responsive | Desktop-first layout | Add responsive breakpoints for mobile |
